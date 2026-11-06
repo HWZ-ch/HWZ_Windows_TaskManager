@@ -146,7 +146,6 @@ dotnet publish .\src\HWZ.TaskManager\HWZ.TaskManager.csproj `
 
 ```text
 HWZ.TaskManager.slnx
-├─ .github/workflows/build.yml       # GitHub Actions 构建
 ├─ docs/                             # 项目图标与界面截图
 └─ src/HWZ.TaskManager
    ├─ App.xaml / App.xaml.cs         # 应用入口、全局异常与主题初始化
