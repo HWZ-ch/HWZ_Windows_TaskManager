@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/HWZ.TaskManager/HWZ.TaskManager.csproj" />
+  </Folder>
+</Solution>

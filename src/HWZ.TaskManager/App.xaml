@@ -1,0 +1,22 @@
+<Application x:Class="HWZ.TaskManager.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:converters="clr-namespace:HWZ.TaskManager.Helpers">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/Dark.xaml" />
+                <ResourceDictionary Source="Themes/Styles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+            <converters:InverseBoolConverter x:Key="InverseBool" />
+            <converters:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility" />
+            <converters:PageVisibilityConverter x:Key="PageVisibility" />
+            <converters:NullToVisibilityConverter x:Key="NullToVisibility" />
+            <converters:NotNullToVisibilityConverter x:Key="NotNullToVisibility" />
+            <converters:EmptyStringToVisibilityConverter x:Key="EmptyStringToVisibility" />
+            <converters:StringNotEmptyToVisibilityConverter x:Key="StringNotEmptyToVisibility" />
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

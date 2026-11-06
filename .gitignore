@@ -1,0 +1,29 @@
+# Build output
+bin/
+obj/
+publish/
+artifacts/
+dist/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+
+# Local test captures and generated packages
+/screenshots/
+*.zip
+*.nupkg
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+
+# OS metadata
+Thumbs.db
+desktop.ini
+.DS_Store
+
+.idea/
+.vscode/
