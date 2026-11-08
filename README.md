@@ -32,10 +32,11 @@
 
 HWZ Windows Task Manager 是一款为 Windows 10 / 11 重新设计的任务管理器。它采用更具层次感的深色 / 浅色双主题界面，把系统状态、性能趋势、进程与服务管理集中在同一个轻量窗口里。
 
-- **本地运行**：不联网、不上传数据、不需要安装额外运行环境（自包含版本）。
+- **本地运行**：监控数据不联网、不上传、不需要安装额外运行环境（自包含版本）。
 - **信息全面**：处理器、内存、磁盘、网络、系统信息、进程、服务与启动项。
 - **操作直接**：搜索、筛选、排序、结束进程树、运行新任务、服务启停，都在几步内完成。
 - **安全克制**：结束任务前确认，保护 Windows 核心进程，启动项只读展示。
+- **持续更新**：启动时自动读取仓库中的隐藏版本清单，下载更新并校验 SHA-256。
 
 ## 界面预览
 
@@ -89,7 +90,17 @@ HWZ Windows Task Manager 是一款为 Windows 10 / 11 重新设计的任务管�
 - 窗口置顶、刷新频率、结束前确认、进程图标显示开关。
 - 设置自动保存到 `%LOCALAPPDATA%\HWZ\TaskManager\settings.json`。
 - 所有监控数据只在本机内存中处理；仅在程序异常时写入本地错误日志，便于排查问题。
-- 不使用遥测、不建立任何网络请求。
+- 不使用遥测。除更新检查外，应用不会主动建立网络连接。
+
+### 自动更新
+
+- 启动时从 `.github/update.json` 读取隐藏版本清单，与当前程序集版本比较。
+- 发现新版本后在后台自动下载，校验 SHA-256，再提示重启安装。
+- 设置页提供“更新”卡片：检查状态、下载进度、更新内容和重试入口。
+- 标题栏显示可用更新徽标，点击即可进入更新设置。
+- 可在设置中关闭“自动检查并下载”，手动检查或打开发布页。
+- 更新源包含三级回退：隐藏清单 → GitHub Contents API → GitHub Releases API。
+- 自更新仅支持发布版单文件 EXE；开发构建或不可写目录会提示前往 Releases 手动下载。
 
 ## 快速开始
 
@@ -98,10 +109,10 @@ HWZ Windows Task Manager 是一款为 Windows 10 / 11 重新设计的任务管�
 前往 [Releases](https://github.com/HWZ-ch/HWZ_Windows_TaskManager/releases/latest) 下载：
 
 ```text
-HWZ.TaskManager-1.0.0-win-x64.exe
+HWZ.TaskManager-1.1.0-win-x64.exe
 ```
 
-这是自包含单文件版本，**无需安装 .NET 运行时**，双击即可运行。
+这是自包含单文件版本，**无需安装 .NET 运行时**，双击即可运行。程序内置自动更新，后续版本可在应用内完成下载与安装。
 
 > 程序未做代码签名。如果 Windows SmartScreen 拦截，请选择“更多信息” → “仍要运行”。
 
@@ -146,15 +157,16 @@ dotnet publish .\src\HWZ.TaskManager\HWZ.TaskManager.csproj `
 
 ```text
 HWZ.TaskManager.slnx
+├─ .github/update.json                # 隐藏的版本清单与更新校验信息
 ├─ docs/                             # 项目图标与界面截图
 └─ src/HWZ.TaskManager
    ├─ App.xaml / App.xaml.cs         # 应用入口、全局异常与主题初始化
    ├─ MainWindow.xaml                # 自定义标题栏、导航、Toast
    ├─ Controls/                      # 圆环仪表与趋势图自绘控件
    ├─ Dialogs/                       # 现代化确认 / 输入 / 详情对话框
-   ├─ Helpers/                       # MVVM、主题、DWM、转换器、格式化
+   ├─ Helpers/                       # MVVM、主题、DWM、版本信息、格式化
    ├─ Models/                        # 设置、进程、服务、启动项、快照
-   ├─ Services/                      # 系统采集、服务、启动项、图标、对话框
+   ├─ Services/                      # 系统采集、服务、启动项、图标、对话框、更新
    ├─ Themes/                        # 深色/浅色资源与控件样式
    ├─ ViewModels/MainViewModel.cs    # 界面状态、命令与刷新循环
    └─ Views/                         # 六个页面
@@ -167,6 +179,7 @@ HWZ.TaskManager.slnx
 - **进程信息**：`Process` API 配合原生窗口枚举、进程路径与 I/O 查询，统一计算增量。
 - **服务发现**：注册表枚举服务元数据，`sc.exe` 获取运行状态；MUI 字符串通过 `SHLoadIndirectString` 本地化解析。
 - **视觉细节**：自绘抗锯齿趋势图、动画圆环、Fluent 风格控件模板、深色 / 浅色动态资源、DWM 圆角与暗色标题栏。
+- **自动更新**：版本号来自程序集；启动时读取隐藏清单，自动下载并校验 SHA-256；通过临时 PowerShell 脚本在当前进程退出后替换单文件 EXE 并重启。
 - **中文环境优化**：处理 IME 拦截的 `Enter` / `Esc` 按键，服务显示名称支持系统本地化资源。
 
 ## 权限与已知限制
@@ -177,7 +190,9 @@ HWZ.TaskManager.slnx
 - 当前版本不监控 GPU 温度 / 占用，也不提供逐进程网络流量。
 - 结束进程可能导致未保存的数据丢失，请谨慎操作。
 - 程序不包含代码签名证书，首次运行时可能触发 SmartScreen 提示。
-- 本地错误日志位置：`%LOCALAPPDATA%\HWZ\TaskManager\error.log`。
+- 自动更新需要程序目录可写；若放在 `Program Files` 等受保护目录，请以管理员身份运行或手动下载新版。
+- 自动更新使用当前 Windows 自带的 PowerShell 完成文件替换，发布包未做代码签名。
+- 本地错误日志位置：`%LOCALAPPDATA%\HWZ\TaskManager\error.log`，更新日志位置：`%LOCALAPPDATA%\HWZ\TaskManager\update.log`。
 
 ## 许可证
 

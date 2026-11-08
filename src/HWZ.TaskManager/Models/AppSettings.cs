@@ -9,6 +9,7 @@ public sealed class AppSettings : ObservableObject
     private bool _alwaysOnTop;
     private bool _confirmOnEnd = true;
     private bool _showProcessIcons = true;
+    private bool _autoUpdate = true;
 
     public string ThemeMode
     {
@@ -38,5 +39,11 @@ public sealed class AppSettings : ObservableObject
     {
         get => _showProcessIcons;
         set => SetProperty(ref _showProcessIcons, value);
+    }
+
+    public bool AutoUpdate
+    {
+        get => _autoUpdate;
+        set => SetProperty(ref _autoUpdate, value);
     }
 }

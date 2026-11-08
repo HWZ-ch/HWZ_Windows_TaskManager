@@ -184,7 +184,7 @@
                     </Border>
 
                     <Grid Margin="4,13,4,0">
-                        <TextBlock Text="v1.0.0"
+                        <TextBlock Text="{Binding AppVersion, StringFormat=v{0}}"
                                    FontSize="9.5"
                                    Foreground="{DynamicResource TextTertiaryBrush}" />
                         <TextBlock Text="本地采集 · 数据不出设备"
@@ -303,6 +303,32 @@
                                 </TextBlock>
                             </StackPanel>
                         </Border>
+
+                        <Button Style="{StaticResource PrimaryButtonStyle}"
+                                Height="27"
+                                Padding="10,3"
+                                Margin="0,0,7,0"
+                                FontSize="10.5"
+                                VerticalAlignment="Center"
+                                Command="{Binding ShowUpdatePageCommand}"
+                                Visibility="{Binding IsUpdateIndicatorVisible, Converter={StaticResource BoolToVisibility}}"
+                                ToolTip="查看可用更新"
+                                AutomationProperties.Name="查看可用更新">
+                            <StackPanel Orientation="Horizontal">
+                                <Path Data="{StaticResource IconDownload}"
+                                      Width="11"
+                                      Height="11"
+                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                      StrokeThickness="1.7"
+                                      StrokeStartLineCap="Round"
+                                      StrokeEndLineCap="Round"
+                                      StrokeLineJoin="Round"
+                                      Stretch="Uniform"
+                                      VerticalAlignment="Center"
+                                      Margin="0,0,5,0" />
+                                <TextBlock Text="{Binding UpdateBadgeText}" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
 
                         <Button Style="{StaticResource IconButtonStyle}"
                                 Command="{Binding RefreshCommand}"

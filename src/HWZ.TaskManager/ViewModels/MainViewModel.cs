@@ -32,7 +32,9 @@ public sealed class MainViewModel : ObservableObject
     private readonly AsyncRelayCommand _startServiceCommand;
     private readonly AsyncRelayCommand _stopServiceCommand;
     private readonly RelayCommand _showDetailsCommand;
+    private readonly AsyncRelayCommand _updateActionCommand;
     private readonly HashSet<string> _failedIconPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly UpdateService _updates = new();
 
     private string _currentPage = "overview";
     private string _searchText = string.Empty;
@@ -84,6 +86,20 @@ public sealed class MainViewModel : ObservableObject
     private int _startupCount;
     private SystemFacts? _systemInfo;
     private int _volumeRefreshTick;
+    private UpdateManifest? _availableUpdate;
+    private CancellationTokenSource? _updateCancellation;
+    private string? _downloadedUpdatePath;
+    private string _updateState = "idle";
+    private string _updateStatusTitle = "自动更新已开启";
+    private string _updateStatusDetail = "启动时会从 GitHub 仓库读取隐藏版本清单。";
+    private string _updateReleaseNotes = string.Empty;
+    private double _updateProgress;
+    private bool _updateAvailable;
+    private bool _isUpdateReady;
+    private bool _isUpdateProgressVisible;
+    private bool _canDownloadUpdate;
+    private bool _selfUpdateSupported;
+    private string _selfUpdateReason = string.Empty;
 
     public MainViewModel(SettingsService settingsService, AppSettings settings, DialogService dialogs)
     {
@@ -149,6 +165,9 @@ public sealed class MainViewModel : ObservableObject
         _refreshStartupCommand = new AsyncRelayCommand(() => LoadStartupAsync(force: true), () => !IsLoadingStartup);
         _startServiceCommand = new AsyncRelayCommand(async parameter => await ChangeServiceAsync(parameter as ServiceRow, true));
         _stopServiceCommand = new AsyncRelayCommand(async parameter => await ChangeServiceAsync(parameter as ServiceRow, false));
+        _updateActionCommand = new AsyncRelayCommand(
+            RunUpdateActionAsync,
+            () => _updateState is not "checking" and not "downloading");
 
         RefreshCommand = _refreshCommand;
         EndTaskCommand = _endTaskCommand;
@@ -172,6 +191,16 @@ public sealed class MainViewModel : ObservableObject
         OpenStartupSettingsCommand = new RelayCommand(OpenStartupSettings);
         OpenStartupLocationCommand = new RelayCommand(parameter => OpenStartupLocation(parameter as StartupRow));
         OpenRepositoryCommand = new RelayCommand(OpenRepository);
+        OpenReleasePageCommand = new RelayCommand(OpenReleasePage);
+        ShowUpdatePageCommand = new RelayCommand(() => CurrentPage = "settings");
+        UpdateActionCommand = _updateActionCommand;
+
+        _selfUpdateSupported = _updates.CanSelfUpdate(out _selfUpdateReason);
+        if (!_settings.AutoUpdate)
+        {
+            _updateStatusTitle = "自动检查已关闭";
+            _updateStatusDetail = "可随时手动检查更新。";
+        }
 
         _settings.PropertyChanged += OnSettingsChanged;
         _timer = new DispatcherTimer(DispatcherPriority.Background)
@@ -195,8 +224,38 @@ public sealed class MainViewModel : ObservableObject
     public IReadOnlyList<RefreshOption> RefreshOptions { get; }
     public IReadOnlyList<string> ProcessFilters { get; }
     public IReadOnlyList<string> ServiceFilters { get; }
-    public string AppVersion => "1.0.0";
-    public string RepositoryUrl => "https://github.com/HWZ-ch/HWZ_Windows_TaskManager";
+    public string AppVersion => AppInfo.VersionText;
+    public string RepositoryUrl => AppInfo.RepositoryUrl;
+    public string UpdateState => _updateState;
+    public string UpdateStatusTitle => _updateStatusTitle;
+    public string UpdateStatusDetail => _updateStatusDetail;
+    public string UpdateReleaseNotes => _updateReleaseNotes;
+    public bool HasUpdateReleaseNotes => !string.IsNullOrWhiteSpace(_updateReleaseNotes);
+    public double UpdateProgress => _updateProgress;
+    public bool IsUpdateProgressVisible => _isUpdateProgressVisible;
+    public bool IsUpdateReady => _isUpdateReady;
+    public bool IsUpdateAvailable => _updateAvailable;
+    public bool IsUpdateIndicatorVisible => _updateAvailable || _isUpdateReady;
+    public bool IsSelfUpdateSupported => _selfUpdateSupported;
+    public string UpdateBadgeText => _isUpdateReady
+        ? "重启更新"
+        : _updateState == "downloading"
+            ? "更新中"
+            : _availableUpdate is { } update
+                ? $"v{update.Version}"
+                : "更新";
+    public string UpdateActionText => _updateState switch
+    {
+        "checking" => "正在检查…",
+        "available" => _selfUpdateSupported && _canDownloadUpdate ? "下载更新" : "打开发布页",
+        "downloading" => $"下载中 {_updateProgress:0}%",
+        "ready" => "重启并安装",
+        "up-to-date" => "再次检查",
+        "failed" => "重试",
+        "download-failed" => "重新下载",
+        "manual" => "打开发布页",
+        _ => "检查更新"
+    };
 
     public ICollectionView ProcessView { get; }
     public ICollectionView ServicesView { get; }
@@ -234,6 +293,9 @@ public sealed class MainViewModel : ObservableObject
     public ICommand OpenStartupSettingsCommand { get; }
     public ICommand OpenStartupLocationCommand { get; }
     public ICommand OpenRepositoryCommand { get; }
+    public ICommand OpenReleasePageCommand { get; }
+    public ICommand ShowUpdatePageCommand { get; }
+    public ICommand UpdateActionCommand { get; }
 
     public string CurrentPage
     {
@@ -700,6 +762,12 @@ public sealed class MainViewModel : ObservableObject
         await RefreshSnapshotAsync(showErrors: true);
         _timer.Start();
         OnPropertyChanged(nameof(LiveStatusText));
+
+        _updates.CleanupOldFiles();
+        if (_settings.AutoUpdate)
+        {
+            _ = CheckForUpdatesAsync(manual: false);
+        }
     }
 
     public void Shutdown()
@@ -707,6 +775,10 @@ public sealed class MainViewModel : ObservableObject
         _timer.Stop();
         _toastTimer.Stop();
         _settings.PropertyChanged -= OnSettingsChanged;
+        _updateCancellation?.Cancel();
+        _updateCancellation?.Dispose();
+        _updateCancellation = null;
+        _updates.Dispose();
         _monitor.Dispose();
     }
 
@@ -1538,6 +1610,286 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    private async Task RunUpdateActionAsync()
+    {
+        switch (_updateState)
+        {
+            case "ready":
+                await InstallUpdateAsync();
+                break;
+            case "available" when _selfUpdateSupported && _canDownloadUpdate:
+                await DownloadUpdateAsync(automatic: false);
+                break;
+            case "download-failed":
+                await DownloadUpdateAsync(automatic: false);
+                break;
+            case "available":
+                OpenReleasePage();
+                break;
+            default:
+                await CheckForUpdatesAsync(manual: true);
+                break;
+        }
+    }
+
+    private async Task CheckForUpdatesAsync(bool manual)
+    {
+        if (_updateState is "checking" or "downloading")
+        {
+            return;
+        }
+
+        _updateCancellation?.Cancel();
+        _updateCancellation?.Dispose();
+        _updateCancellation = new CancellationTokenSource();
+
+        SetUpdateState("checking", "正在检查更新…", "正在读取仓库中的隐藏版本清单。");
+
+        try
+        {
+            var result = await _updates.CheckForUpdatesAsync(_updateCancellation.Token);
+            if (result.Status == UpdateCheckStatus.UpdateAvailable && result.Manifest is not null)
+            {
+                var manifest = result.Manifest;
+                _availableUpdate = manifest;
+                _downloadedUpdatePath = null;
+                _isUpdateReady = false;
+                _updateAvailable = true;
+                _canDownloadUpdate = UpdateService.CanDownload(manifest);
+                _updateReleaseNotes = FormatReleaseNotes(manifest.ReleaseNotes);
+                _updateProgress = 0;
+                _isUpdateProgressVisible = false;
+
+                var detail = _canDownloadUpdate && _selfUpdateSupported
+                    ? $"当前 v{AppVersion}，新版本 v{manifest.Version} 已准备好。"
+                    : $"{result.Message} {_selfUpdateReason}".Trim();
+
+                SetUpdateState("available", $"发现新版本 v{manifest.Version}", detail);
+                NotifyUpdateAvailability();
+                ShowToast($"发现新版本 v{manifest.Version}");
+                UpdateService.Log($"Update available: {manifest.Version}.");
+
+                if (!manual && _settings.AutoUpdate && _canDownloadUpdate && _selfUpdateSupported)
+                {
+                    await DownloadUpdateAsync(automatic: true);
+                }
+            }
+            else if (result.Status == UpdateCheckStatus.UpToDate)
+            {
+                _availableUpdate = null;
+                _downloadedUpdatePath = null;
+                _isUpdateReady = false;
+                _updateAvailable = false;
+                _canDownloadUpdate = false;
+                _updateReleaseNotes = string.Empty;
+                _updateProgress = 0;
+                _isUpdateProgressVisible = false;
+
+                SetUpdateState(
+                    "up-to-date",
+                    "已是最新版本",
+                    $"当前 v{AppVersion}，无需更新。");
+                NotifyUpdateAvailability();
+
+                if (manual)
+                {
+                    ShowToast("当前已是最新版本");
+                }
+            }
+            else
+            {
+                SetUpdateState("failed", "检查更新失败", result.Message);
+                UpdateService.Log("Update check failed: " + result.Message);
+                if (manual)
+                {
+                    ShowToast(result.Message, true);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The window is closing.
+        }
+        catch (Exception exception)
+        {
+            SetUpdateState("failed", "检查更新失败", "更新服务暂时不可用，请稍后重试。");
+            UpdateService.Log("Unexpected update error: " + exception);
+            if (manual)
+            {
+                ShowToast("检查更新失败：" + exception.Message, true);
+            }
+        }
+    }
+
+    private async Task DownloadUpdateAsync(bool automatic)
+    {
+        var manifest = _availableUpdate;
+        if (manifest is null || _updateState == "downloading")
+        {
+            return;
+        }
+
+        if (!_selfUpdateSupported || !UpdateService.CanDownload(manifest))
+        {
+            OpenReleasePage();
+            return;
+        }
+
+        if (_updateCancellation is null)
+        {
+            _updateCancellation = new CancellationTokenSource();
+        }
+
+        var token = _updateCancellation.Token;
+        _updateProgress = 0;
+        _isUpdateProgressVisible = true;
+        OnPropertyChanged(nameof(UpdateProgress));
+        OnPropertyChanged(nameof(IsUpdateProgressVisible));
+        SetUpdateState(
+            "downloading",
+            $"正在下载 v{manifest.Version}",
+            automatic ? "新版本会自动下载，完成后可选择重启安装。" : "正在从 GitHub 下载更新包…");
+
+        var progress = new Progress<double>(value =>
+        {
+            var rounded = Math.Clamp(value, 0, 100);
+            if (Math.Abs(rounded - _updateProgress) < 0.2)
+            {
+                return;
+            }
+
+            _updateProgress = rounded;
+            OnPropertyChanged(nameof(UpdateProgress));
+            OnPropertyChanged(nameof(UpdateActionText));
+        });
+
+        try
+        {
+            var path = await _updates.DownloadAsync(manifest, progress, token);
+            _downloadedUpdatePath = path;
+            _isUpdateReady = true;
+            _updateAvailable = true;
+            _updateProgress = 100;
+            _isUpdateProgressVisible = false;
+
+            SetUpdateState(
+                "ready",
+                $"v{manifest.Version} 已准备好",
+                "更新包已通过 SHA-256 校验。点击“重启并安装”即可完成更新。");
+            NotifyUpdateAvailability();
+            ShowToast($"v{manifest.Version} 已下载，可重启安装");
+        }
+        catch (OperationCanceledException)
+        {
+            _isUpdateProgressVisible = false;
+            OnPropertyChanged(nameof(IsUpdateProgressVisible));
+        }
+        catch (Exception exception)
+        {
+            _isUpdateProgressVisible = false;
+            _updateProgress = 0;
+            OnPropertyChanged(nameof(UpdateProgress));
+            OnPropertyChanged(nameof(IsUpdateProgressVisible));
+            SetUpdateState("download-failed", "更新下载失败", exception.Message);
+            UpdateService.Log("Update download failed: " + exception);
+            ShowToast("更新下载失败：" + exception.Message, true);
+        }
+    }
+
+    private async Task InstallUpdateAsync()
+    {
+        var manifest = _availableUpdate;
+        var path = _downloadedUpdatePath;
+        if (manifest is null || string.IsNullOrWhiteSpace(path) || !_isUpdateReady)
+        {
+            return;
+        }
+
+        if (!_dialogs.Confirm(
+                "安装更新",
+                $"将关闭当前窗口并重启到 v{manifest.Version}。\n\n更新包已经过 SHA-256 校验，是否继续？",
+                "重启并安装"))
+        {
+            return;
+        }
+
+        try
+        {
+            await Task.Run(() => _updates.LaunchInstaller(path, manifest.Sha256));
+            ShowToast("正在重启并安装更新");
+            Application.Current.Shutdown();
+        }
+        catch (Exception exception)
+        {
+            SetUpdateState("failed", "无法安装更新", exception.Message);
+            UpdateService.Log("Update install failed: " + exception);
+            _dialogs.ShowMessage("无法安装更新", exception.Message);
+        }
+    }
+
+    private void OpenReleasePage()
+    {
+        var url = _availableUpdate?.ReleasePageUrl;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+            uri.Scheme != Uri.UriSchemeHttps ||
+            !string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase) ||
+            !uri.AbsolutePath.StartsWith(
+                "/HWZ-ch/HWZ_Windows_TaskManager/releases",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            url = AppInfo.RepositoryUrl + "/releases/latest";
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception exception)
+        {
+            ShowToast("无法打开浏览器：" + exception.Message, true);
+        }
+    }
+
+    private void NotifyUpdateAvailability()
+    {
+        OnPropertyChanged(nameof(IsUpdateAvailable));
+        OnPropertyChanged(nameof(IsUpdateIndicatorVisible));
+        OnPropertyChanged(nameof(UpdateBadgeText));
+        OnPropertyChanged(nameof(UpdateReleaseNotes));
+        OnPropertyChanged(nameof(HasUpdateReleaseNotes));
+        OnPropertyChanged(nameof(UpdateProgress));
+        OnPropertyChanged(nameof(IsUpdateProgressVisible));
+        OnPropertyChanged(nameof(UpdateActionText));
+        _updateActionCommand.RaiseCanExecuteChanged();
+    }
+
+    private void SetUpdateState(string state, string title, string detail)
+    {
+        _updateState = state;
+        _updateStatusTitle = title;
+        _updateStatusDetail = detail;
+        OnPropertyChanged(nameof(UpdateState));
+        OnPropertyChanged(nameof(UpdateStatusTitle));
+        OnPropertyChanged(nameof(UpdateStatusDetail));
+        OnPropertyChanged(nameof(UpdateActionText));
+        OnPropertyChanged(nameof(UpdateBadgeText));
+        OnPropertyChanged(nameof(IsUpdateIndicatorVisible));
+        _updateActionCommand.RaiseCanExecuteChanged();
+    }
+
+    private static string FormatReleaseNotes(string notes)
+    {
+        if (string.IsNullOrWhiteSpace(notes))
+        {
+            return string.Empty;
+        }
+
+        var normalized = notes.Replace("\r\n", "\n").Trim();
+        return normalized.Length > 640
+            ? normalized[..640].TrimEnd() + "…"
+            : normalized;
+    }
+
     private void OpenRepository()
     {
         try
@@ -1585,6 +1937,15 @@ public sealed class MainViewModel : ObservableObject
                     {
                         item.IconSource = IconLoader.Load(item.ExecutablePath);
                     }
+                }
+
+                break;
+            case nameof(AppSettings.AutoUpdate):
+                if (_settings.AutoUpdate &&
+                    _initialized &&
+                    _updateState is not "ready" and not "checking" and not "downloading")
+                {
+                    _ = CheckForUpdatesAsync(manual: false);
                 }
 
                 break;

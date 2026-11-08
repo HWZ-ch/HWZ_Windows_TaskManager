@@ -1,0 +1,8 @@
+{
+  "version": "1.1.0",
+  "downloadUrl": "https://github.com/HWZ-ch/HWZ_Windows_TaskManager/releases/download/v1.1.0/HWZ.TaskManager-1.1.0-win-x64.exe",
+  "sha256": "C89FABFC056F7D5D8ECBA8AA2C4BD4D8A634A20138A8701AD28700E2B749551A",
+  "releasePageUrl": "https://github.com/HWZ-ch/HWZ_Windows_TaskManager/releases/tag/v1.1.0",
+  "publishedAt": "2026-11-08T04:50:24Z",
+  "releaseNotes": "新增自动更新：启动时读取仓库中的隐藏版本清单，自动检查并下载新版本，校验 SHA-256 后支持一键重启安装。\n设置页新增更新卡片与自动检查开关，标题栏会显示可用更新入口。\n更新源支持隐藏清单、GitHub Contents API 与 Releases API 三级回退。"
+}
